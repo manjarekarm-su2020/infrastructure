@@ -25,6 +25,7 @@ resource "aws_subnet" "subnet1" {
   vpc_id            = "${aws_vpc.vpc.id}"
   availability_zone = "us-east-1a"
   cidr_block        = "${cidrsubnet(aws_vpc.vpc.cidr_block, 4, 1)}"
+  map_public_ip_on_launch = true
   tags = { 
     Name = "${var.subnet_name1}"
   }
@@ -34,6 +35,7 @@ resource "aws_subnet" "subnet2" {
   vpc_id            = "${aws_vpc.vpc.id}"
   availability_zone = "us-east-1b"
   cidr_block        = "${cidrsubnet(aws_vpc.vpc.cidr_block, 4, 2)}"
+  map_public_ip_on_launch = true
   tags = { 
     Name = "${var.subnet_name2}"
   }
@@ -43,6 +45,7 @@ resource "aws_subnet" "subnet3" {
   vpc_id            = "${aws_vpc.vpc.id}"
   availability_zone = "us-east-1c"
   cidr_block        = "${cidrsubnet(aws_vpc.vpc.cidr_block, 4, 3)}"
+  map_public_ip_on_launch = true
   tags = { 
     Name = "${var.subnet_name3}"
   }
@@ -67,7 +70,6 @@ resource "aws_route_table" "route_table" {
   tags = {
     Name = "${var.route_table_name}"
   }
-
 }
 
 resource "aws_route_table_association" "route_subnet1" {

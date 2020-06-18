@@ -248,7 +248,7 @@ resource "aws_instance" "ec2_instance" {
   associate_public_ip_address = true
   source_dest_check           = false
   subnet_id                   = "${aws_subnet.subnet1.id}"
-  depends_on                  = ["aws_db_instance.rds_instance"]
+  depends_on                  = ["aws_db_instance.rds_instance","aws_s3_bucket.s3_bucket"]
   iam_instance_profile 		  = "${aws_iam_instance_profile.ec2_instance_profile.name}"
   
   tags = {

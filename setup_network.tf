@@ -9,6 +9,11 @@ variable "vpc_cidr" {}
 variable "public_destination_route_cidr" {}
 variable "ami_id" { }
 variable "key_name" { }
+variable "s3_bucket_name" {}
+variable "rds_username" {}
+variable "rds_password" {}
+variable "rds_db_name" {}
+variable "rds_identifier" {}
 
 provider "aws" {
   region  = "${var.region}"
@@ -202,9 +207,10 @@ resource "aws_db_subnet_group" "db_subnet_group" {
   subnet_ids = ["${aws_subnet.subnet1.id}", "${aws_subnet.subnet2.id}"]
 }
 
+
 resource "aws_db_instance" "rds_instance" {
   allocated_storage      = 20
-  identifier             = "csye6225-su2020"
+  identifier             = "${var.rds_identifier}"
   multi_az               = false
   db_subnet_group_name   = "${aws_db_subnet_group.db_subnet_group.name}"
   engine                 = "mysql"
@@ -213,9 +219,9 @@ resource "aws_db_instance" "rds_instance" {
   vpc_security_group_ids = ["${aws_security_group.database.id}"]
   skip_final_snapshot    = true
   publicly_accessible    = false
-  name                   = "csye6225"
-  username               = "csye6225_su2020"
-  password               = "Root123#"
+  name                   = "${var.rds_db_name}"
+  username               = "${var.rds_username}"
+  password               = "${var.rds_password}"
 
   tags = {
   	Name = "rds_instance"
@@ -229,10 +235,10 @@ resource "aws_instance" "ec2_instance" {
   user_data     = <<-EOF
                       #!/bin/bash
                       echo export host=${aws_db_instance.rds_instance.address} >> /etc/profile
-                      echo export S3_BUCKET_NAME=webapp.mitali.manjarekar >> /etc/profile
-                      echo export RDS_USER_NAME=csye6225_su2020 >> /etc/profile
-                      echo export RDS_PASSWORD=Root123# >> /etc/profile
-                      echo export RDS_DB_NAME=csye6225 >> /etc/profile
+                      echo export S3_BUCKET_NAME=${var.s3_bucket_name} >> /etc/profile
+                      echo export RDS_USER_NAME=${var.rds_username} >> /etc/profile
+                      echo export RDS_PASSWORD=${var.rds_password} >> /etc/profile
+                      echo export RDS_DB_NAME=${var.rds_db_name} >> /etc/profile
                       echo export PORT=3000 >> /etc/profile
 					EOF
 

@@ -1,20 +1,20 @@
-variable "region" { }
-variable "vpc_name" {}
-variable "subnet_name1" {}
-variable "subnet_name2" {}
-variable "subnet_name3" {}
-variable "internet_gateway_name" {}
-variable "route_table_name" {}
-variable "vpc_cidr" {}
-variable "public_destination_route_cidr" {}
+variable "region" {}
+variable "vpc_name" {default="newvpc"}
+variable "subnet_name1" {default="newsubnet1"}
+variable "subnet_name2" {default="newsubnet2"}
+variable "subnet_name3" {default="newsubnet3"}
+variable "internet_gateway_name" {default="newgateway"}
+variable "route_table_name" {default="newroute"}
+variable "vpc_cidr" {default="172.16.0.0/16"}
+variable "public_destination_route_cidr" {default="0.0.0.0/0"}
 variable "ami_id" {}
-variable "key_name" {}
+variable "key_name" { default="nodejs_instance"}
 variable "s3_bucket_name" {}
-variable "rds_username" {}
-variable "rds_password" {}
-variable "rds_db_name" {}
-variable "rds_identifier" {}
-variable "account_num" {}
+variable "rds_username" {default="csye6225_su2020"}
+variable "rds_password" {default="Root123#"}
+variable "rds_db_name" {default="csye6225"}
+variable "rds_identifier" {default="csye6225-su2020"}
+variable "account_num" {default="107279788489"}
 
 
 provider "aws" {
@@ -179,7 +179,7 @@ resource "aws_security_group" "database" {
 
 resource "aws_s3_bucket" "s3_bucket" {
 
-  bucket        = "webapp.mitali.manjrekar"
+  bucket        = "webapp.mitali.manjarekar"
   acl           = "private"
   force_destroy = true
 
@@ -212,9 +212,8 @@ resource "aws_s3_bucket" "codedeploy_bucket" {
 
   lifecycle_rule {
     enabled = true
-    transition {
+    expiration {
       days          = 30
-      storage_class = "STANDARD_IA"
     }
   }
   
@@ -412,54 +411,6 @@ resource "aws_iam_policy" "policy2" {
 EOF
 }
 
-resource "aws_iam_policy" "policy3" {
-  name        = "circleci-ec2-ami"
-  description = "EC2 access for user circleci"
-  policy      = <<EOF
-{
-  "Version": "2012-10-17",
-  "Statement": [{
-      "Effect": "Allow",
-      "Action" : [
-        "ec2:AttachVolume",
-        "ec2:AuthorizeSecurityGroupIngress",
-        "ec2:CopyImage",
-        "ec2:CreateImage",
-        "ec2:CreateKeypair",
-        "ec2:CreateSecurityGroup",
-        "ec2:CreateSnapshot",
-        "ec2:CreateTags",
-        "ec2:CreateVolume",
-        "ec2:DeleteKeyPair",
-        "ec2:DeleteSecurityGroup",
-        "ec2:DeleteSnapshot",
-        "ec2:DeleteVolume",
-        "ec2:DeregisterImage",
-        "ec2:DescribeImageAttribute",
-        "ec2:DescribeImages",
-        "ec2:DescribeInstances",
-        "ec2:DescribeInstanceStatus",
-        "ec2:DescribeRegions",
-        "ec2:DescribeSecurityGroups",
-        "ec2:DescribeSnapshots",
-        "ec2:DescribeSubnets",
-        "ec2:DescribeTags",
-        "ec2:DescribeVolumes",
-        "ec2:DetachVolume",
-        "ec2:GetPasswordData",
-        "ec2:ModifyImageAttribute",
-        "ec2:ModifyInstanceAttribute",
-        "ec2:ModifySnapshotAttribute",
-        "ec2:RegisterImage",
-        "ec2:RunInstances",
-        "ec2:StopInstances",
-        "ec2:TerminateInstances"
-      ],
-      "Resource" : "*"
-  }]
-}
-EOF
-}
 
 #attach policies to circleci user
 
@@ -477,12 +428,6 @@ resource "aws_iam_policy_attachment" "circleci_attach2" {
   policy_arn = "${aws_iam_policy.policy2.arn}"
 }
 
-resource "aws_iam_policy_attachment" "circleci_attach3" {
-  name  = "circleci_attach3"
-  users = ["circleci"]
-  groups     = ["circleci"]
-  policy_arn = "${aws_iam_policy.policy3.arn}"
-}
 
 #-----------------------------------------------------------------------------------
 
@@ -554,8 +499,8 @@ resource "aws_iam_policy" "ec2_role_policy2" {
             ],
             "Effect": "Allow",
             "Resource": [
-                "arn:aws:s3:::webapp.mitali.manjrekar",
-                "arn:aws:s3:::webapp.mitali.manjrekar/*"
+                "arn:aws:s3:::webapp.mitali.manjarekar",
+                "arn:aws:s3:::webapp.mitali.manjarekar/*"
             ]
         }
     ]
@@ -578,6 +523,13 @@ resource "aws_iam_policy_attachment" "ec2_attach2" {
   policy_arn = "${aws_iam_policy.ec2_role_policy2.arn}"
 }
 
+#attach policy for cloudwatch agent
+resource "aws_iam_policy_attachment" "ec2_attach3" {
+  name       = "ec2attach3"
+  users      = ["cicd"]
+  roles      = ["${aws_iam_role.ec2_role.name}"]
+  policy_arn = "arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy"
+}
 
 
 #--------------------------------------------------------------------
@@ -616,8 +568,9 @@ resource "aws_iam_role_policy" "codedeploy_policy1" {
     "Statement": [
         {
             "Action": [
+                "s3:Get*",
                 "ec2:*",
-                "s3:*"
+                "s3:List*"
             ],
             "Effect": "Allow",
             "Resource": [
@@ -637,3 +590,24 @@ resource "aws_iam_instance_profile" "ec2_instance_profile" {
 }
 
 #----------------------------------------------------------------------
+
+#cloudwatch log stream and log group
+
+resource "aws_cloudwatch_log_group" "log_group" {
+  name = "csye6225"
+
+  tags = {
+    name = "csye6225"
+  }
+}
+
+resource "aws_cloudwatch_log_stream" "log_stream" {
+  name           = "webapp"
+  log_group_name = "${aws_cloudwatch_log_group.log_group.name}"
+}
+
+resource "aws_cloudwatch_log_stream" "log_stream2" {
+  name           = "cloudwatch_log_stream"
+  log_group_name = "${aws_cloudwatch_log_group.log_group.name}"
+}
+

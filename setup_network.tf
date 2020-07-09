@@ -8,13 +8,13 @@ variable "route_table_name" {default="newroute"}
 variable "vpc_cidr" {default="172.16.0.0/16"}
 variable "public_destination_route_cidr" {default="0.0.0.0/0"}
 variable "ami_id" {}
-variable "key_name" { default="nodejs_instance"}
+variable "key_name" { default="instance_prod"}
 variable "s3_bucket_name" {}
 variable "rds_username" {default="csye6225_su2020"}
 variable "rds_password" {default="Root123#"}
 variable "rds_db_name" {default="csye6225"}
 variable "rds_identifier" {default="csye6225-su2020"}
-variable "account_num" {default="107279788489"}
+variable "account_num" {default="210150958355"}
 
 
 provider "aws" {
@@ -179,7 +179,7 @@ resource "aws_security_group" "database" {
 
 resource "aws_s3_bucket" "s3_bucket" {
 
-  bucket        = "webapp.mitali.manjarekar"
+  bucket        = "webapp.mitali.manjrekar"
   acl           = "private"
   force_destroy = true
 
@@ -206,7 +206,7 @@ resource "aws_s3_bucket" "s3_bucket" {
 
 resource "aws_s3_bucket" "codedeploy_bucket" {
 
-  bucket        = "codedeploy.mitalimanjrekar.me"
+  bucket        = "codedeploy.mitalimanjarkar.me"
   acl           = "private"
   force_destroy = true
 
@@ -359,8 +359,8 @@ resource "aws_iam_policy" "policy1" {
                 "s3:List*"
             ],
             "Resource": [
-              "arn:aws:s3:::codedeploy.mitalimanjrekar.me",
-              "arn:aws:s3:::codedeploy.mitalimanjrekar.me/*"
+              "arn:aws:s3:::codedeploy.mitalimanjarkar.me",
+              "arn:aws:s3:::codedeploy.mitalimanjarkar.me/*"
             ]
         }
     ]
@@ -476,8 +476,8 @@ resource "aws_iam_policy" "ec2_role_policy1" {
             ],
             "Effect": "Allow",
             "Resource": [
-              "arn:aws:s3:::codedeploy.mitalimanjrekar.me",
-              "arn:aws:s3:::codedeploy.mitalimanjrekar.me/*",
+              "arn:aws:s3:::codedeploy.mitalimanjarkar.me",
+              "arn:aws:s3:::codedeploy.mitalimanjarkar.me/*",
               "arn:aws:iam::${var.account_num}:role/CodeDeployServiceRole"
               ]
         }
@@ -499,8 +499,8 @@ resource "aws_iam_policy" "ec2_role_policy2" {
             ],
             "Effect": "Allow",
             "Resource": [
-                "arn:aws:s3:::webapp.mitali.manjarekar",
-                "arn:aws:s3:::webapp.mitali.manjarekar/*"
+                "arn:aws:s3:::webapp.mitali.manjrekar",
+                "arn:aws:s3:::webapp.mitali.manjrekar/*"
             ]
         }
     ]

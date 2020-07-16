@@ -1,4 +1,4 @@
-variable "region" {}
+variable "region" {default="us-east-1"}
 variable "vpc_name" {default="newvpc"}
 variable "subnet_name1" {default="newsubnet1"}
 variable "subnet_name2" {default="newsubnet2"}
@@ -9,13 +9,15 @@ variable "vpc_cidr" {default="172.16.0.0/16"}
 variable "public_destination_route_cidr" {default="0.0.0.0/0"}
 variable "ami_id" {}
 variable "key_name" { default="instance_prod"}
-variable "s3_bucket_name" {}
+variable "s3_bucket_name" {default="webapp.mitali.manjarekarr"}
 variable "rds_username" {default="csye6225_su2020"}
 variable "rds_password" {default="Root123#"}
 variable "rds_db_name" {default="csye6225"}
 variable "rds_identifier" {default="csye6225-su2020"}
 variable "account_num" {default="210150958355"}
-
+variable "domain_name" {default="prod.mitalimanjarekar.me"}
+variable "webapp_bucket_name" {default="webapp.mitali.manjarekarr"}
+variable "codedeploy_bucket_name" {default="codedeploy.mitalimanjarekarr.me"}
 
 provider "aws" {
   region  = "${var.region}"
@@ -107,36 +109,15 @@ resource "aws_security_group" "application" {
   description = "open instance ports for application"
   vpc_id      = "${aws_vpc.vpc.id}"
 
-  ingress {
-    description = "allow tcp traffic on port 443"
-    from_port   = 443
-    to_port     = 443
-    protocol    = "tcp"
-    cidr_blocks     = ["0.0.0.0/0"]
-  }
+
 
   ingress {
-    description = "allow tcp traffic on port 22"
-    from_port   = 22
-    to_port     = 22
-    protocol    = "tcp"
-    cidr_blocks     = ["0.0.0.0/0"]
-  }
-  
-  ingress {
-    description = "allow tcp traffic on port 80"
-    from_port   = 80
-    to_port     = 80
-    protocol    = "tcp"
-    cidr_blocks     = ["0.0.0.0/0"]
-  }
-
-  ingress {
-    description = "allow tcp traffic on port 3000"
+    description = "allow tcp traffic from load balancer on port 3000"
     from_port   = 3000
     to_port     = 3000
     protocol    = "tcp"
     cidr_blocks     = ["0.0.0.0/0"]
+    security_groups = ["${aws_security_group.alb.id}"]
   }
 
   egress {
@@ -179,7 +160,7 @@ resource "aws_security_group" "database" {
 
 resource "aws_s3_bucket" "s3_bucket" {
 
-  bucket        = "webapp.mitali.manjrekar"
+  bucket        = "${var.webapp_bucket_name}"
   acl           = "private"
   force_destroy = true
 
@@ -206,7 +187,7 @@ resource "aws_s3_bucket" "s3_bucket" {
 
 resource "aws_s3_bucket" "codedeploy_bucket" {
 
-  bucket        = "codedeploy.mitalimanjarkar.me"
+  bucket        = "${var.codedeploy_bucket_name}"
   acl           = "private"
   force_destroy = true
 
@@ -256,40 +237,6 @@ resource "aws_db_instance" "rds_instance" {
   }
 }
 
-resource "aws_instance" "ec2_instance" {
-  ami           = "${var.ami_id}"
-  instance_type = "t2.micro"
-  key_name    = "${var.key_name}" 
-  user_data     = <<-EOF
-                      #!/bin/bash
-                      echo export host=${aws_db_instance.rds_instance.address} >> /etc/profile
-                      echo export S3_BUCKET_NAME=${var.s3_bucket_name} >> /etc/profile
-                      echo export RDS_USER_NAME=${var.rds_username} >> /etc/profile
-                      echo export RDS_PASSWORD=${var.rds_password} >> /etc/profile
-                      echo export RDS_DB_NAME=${var.rds_db_name} >> /etc/profile
-                      echo export PORT=3000 >> /etc/profile
-          EOF
-
-  ebs_block_device {
-      device_name           = "/dev/sda1"
-      volume_size           = "20"
-      volume_type           = "gp2"
-      delete_on_termination = "true"
-  }
-  
-  vpc_security_group_ids = ["${aws_security_group.application.id}"]
-
-  associate_public_ip_address = true
-  source_dest_check           = false
-  subnet_id                   = "${aws_subnet.subnet1.id}"
-  depends_on                  = ["aws_db_instance.rds_instance","aws_s3_bucket.s3_bucket"]
-  iam_instance_profile      = aws_iam_instance_profile.ec2_instance_profile.name
-  
-  tags = {
-    Name = "target_ec2_instance"
-  }
-}
-
 resource "aws_dynamodb_table" "dynamodb_table" {
   name           = "csye6225"
   billing_mode   = "PROVISIONED"
@@ -329,15 +276,17 @@ resource "aws_codedeploy_deployment_group" "deployment" {
       value = "target_ec2_instance"
     }
   }
-  
-  
+
+
   auto_rollback_configuration {
     enabled = true
     events  = ["DEPLOYMENT_FAILURE"]
   }
 
+   autoscaling_groups = ["${aws_autoscaling_group.autoscale.name}"]
+ }
 
-}
+
 
 #-----------------------------------------------------------------
 
@@ -359,8 +308,8 @@ resource "aws_iam_policy" "policy1" {
                 "s3:List*"
             ],
             "Resource": [
-              "arn:aws:s3:::codedeploy.mitalimanjarkar.me",
-              "arn:aws:s3:::codedeploy.mitalimanjarkar.me/*"
+              "arn:aws:s3:::${var.codedeploy_bucket_name}",
+              "arn:aws:s3:::${var.codedeploy_bucket_name}/*"
             ]
         }
     ]
@@ -472,12 +421,13 @@ resource "aws_iam_policy" "ec2_role_policy1" {
                 "s3:List*",
                 "iam:PassRole",
                 "iam:ListInstanceProfiles",
-                "iam:PassRole"
+                "iam:PassRole",
+                "autoscaling:*"
             ],
             "Effect": "Allow",
             "Resource": [
-              "arn:aws:s3:::codedeploy.mitalimanjarkar.me",
-              "arn:aws:s3:::codedeploy.mitalimanjarkar.me/*",
+              "arn:aws:s3:::${var.codedeploy_bucket_name}",
+              "arn:aws:s3:::${var.codedeploy_bucket_name}/*",
               "arn:aws:iam::${var.account_num}:role/CodeDeployServiceRole"
               ]
         }
@@ -499,8 +449,8 @@ resource "aws_iam_policy" "ec2_role_policy2" {
             ],
             "Effect": "Allow",
             "Resource": [
-                "arn:aws:s3:::webapp.mitali.manjrekar",
-                "arn:aws:s3:::webapp.mitali.manjrekar/*"
+                "arn:aws:s3:::${var.webapp_bucket_name}",
+                "arn:aws:s3:::${var.webapp_bucket_name}/*"
             ]
         }
     ]
@@ -570,7 +520,8 @@ resource "aws_iam_role_policy" "codedeploy_policy1" {
             "Action": [
                 "s3:Get*",
                 "ec2:*",
-                "s3:List*"
+                "s3:List*",
+                "autoscaling:*"
             ],
             "Effect": "Allow",
             "Resource": [
@@ -581,6 +532,7 @@ resource "aws_iam_role_policy" "codedeploy_policy1" {
 }
   EOF
 }
+
 
 #------------------------------------------------------------------------
 
@@ -609,5 +561,200 @@ resource "aws_cloudwatch_log_stream" "log_stream" {
 resource "aws_cloudwatch_log_stream" "log_stream2" {
   name           = "cloudwatch_log_stream"
   log_group_name = "${aws_cloudwatch_log_group.log_group.name}"
+}
+
+#----------------------------------------------------------------------
+
+#autoscaling
+
+resource "aws_launch_configuration" "autoscale_config" {
+  name = "aws-launch-config"
+  image_id = "${var.ami_id}"
+  instance_type = "t2.micro"
+  key_name = "${var.key_name}"
+  associate_public_ip_address = true
+  depends_on                  = ["aws_db_instance.rds_instance","aws_s3_bucket.s3_bucket"]
+  user_data = <<-EOF
+                      #!/bin/bash
+                      echo export host=${aws_db_instance.rds_instance.address} >> /etc/profile
+                      echo export S3_BUCKET_NAME=${var.s3_bucket_name} >> /etc/profile
+                      echo export RDS_USER_NAME=${var.rds_username} >> /etc/profile
+                      echo export RDS_PASSWORD=${var.rds_password} >> /etc/profile
+                      echo export RDS_DB_NAME=${var.rds_db_name} >> /etc/profile
+                      echo export PORT=3000 >> /etc/profile
+          EOF
+  iam_instance_profile = "${aws_iam_instance_profile.ec2_instance_profile.name}"
+  security_groups = ["${aws_security_group.application.id}"]
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+resource "aws_autoscaling_group" "autoscale" {
+  name                      = "autoscale_a8"
+  max_size                  = 5
+  min_size                  = 2
+  desired_capacity          = 2
+  default_cooldown          = 60
+  launch_configuration      = "${aws_launch_configuration.autoscale_config.name}"
+  vpc_zone_identifier       = ["${aws_subnet.subnet1.id}", "${aws_subnet.subnet2.id}"]
+
+  tag {
+    key                 = "Name"
+    value               = "target_ec2_instance"
+    propagate_at_launch = true
+  }
+}
+
+resource "aws_autoscaling_policy" "Scaleup_policy" {
+  name                   = "WebServerScaleUpPolicy"
+  adjustment_type        = "ChangeInCapacity"
+  scaling_adjustment     = 1
+  cooldown               = 60
+  autoscaling_group_name = "${aws_autoscaling_group.autoscale.name}"
+}
+
+resource "aws_autoscaling_policy" "Scaledown_policy" {
+  name                   = "WebServerScaleDownPolicy"
+  adjustment_type        = "ChangeInCapacity"
+  scaling_adjustment     = -1
+  cooldown               = 60
+  autoscaling_group_name = "${aws_autoscaling_group.autoscale.name}"
+}
+
+resource "aws_cloudwatch_metric_alarm" "cpu_alarm_high" {
+  alarm_name          = "CPUAlarmHigh"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = "2"
+  metric_name         = "CPUUtilization"
+  namespace           = "AWS/EC2"
+  period              = "300"
+  statistic           = "Average"
+  threshold           = "5"
+
+  dimensions = {
+    AutoScalingGroupName = "${aws_autoscaling_group.autoscale.name}"
+  }
+
+  alarm_description = "This metric monitors high ec2 cpu utilization"
+  alarm_actions     = ["${aws_autoscaling_policy.Scaleup_policy.arn}"]
+}
+
+resource "aws_cloudwatch_metric_alarm" "cpu_alarm_low" {
+  alarm_name          = "CPUAlarmLow"
+  comparison_operator = "LessThanThreshold"
+  evaluation_periods  = "2"
+  metric_name         = "CPUUtilization"
+  namespace           = "AWS/EC2"
+  period              = "300"
+  statistic           = "Average"
+  threshold           = "3"
+
+  dimensions = {
+    AutoScalingGroupName = "${aws_autoscaling_group.autoscale.name}"
+  }
+
+  alarm_description = "This metric monitors ec2 cpu utilization"
+  alarm_actions     = ["${aws_autoscaling_policy.Scaledown_policy.arn}"]
+}
+
+#-----------------------------------------------------------------------
+#Load Balancer
+
+#LB security group
+resource "aws_security_group" "alb" {
+  name        = "app_load_balancer"
+  description = "forward to instances"
+  vpc_id      = "${aws_vpc.vpc.id}"
+
+  ingress {
+    description = "allow http traffic on port 80"
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks     = ["0.0.0.0/0"]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = {
+    Name = "app_load_balancer"
+  }
+}
+
+resource "aws_alb" "alb" {
+  name               = "WebappLoadBalancer"
+  internal           = false
+  load_balancer_type = "application"
+  security_groups    = ["${aws_security_group.alb.id}"]
+  subnets            = ["${aws_subnet.subnet1.id}","${aws_subnet.subnet2.id}"]
+}
+
+
+resource "aws_alb_listener" "alb_listener" {  
+  load_balancer_arn = "${aws_alb.alb.arn}"  
+  port              = "80"  
+  protocol          = "HTTP"
+  
+  default_action {    
+    target_group_arn = "${aws_alb_target_group.alb_target_group.arn}"
+    type             = "forward"  
+  }
+}
+
+
+resource "aws_alb_target_group" "alb_target_group" {  
+  name     = "albTargetGroup"  
+  port     = "3000"  
+  protocol = "HTTP"  
+  vpc_id   = "${aws_vpc.vpc.id}"   
+  tags = {    
+    Name = "alb_target_group"    
+  }   
+  stickiness {    
+    type            = "lb_cookie"    
+    cookie_duration = 1800    
+    enabled         = true  
+  }   
+    health_check {    
+    healthy_threshold   = 3    
+    unhealthy_threshold = 10  
+    timeout             = 50    
+    interval            = 52    
+    path                = "/"    
+  } 
+}
+
+#Autoscaling Attachment
+resource "aws_autoscaling_attachment" "alb_asg" {
+  alb_target_group_arn   = "${aws_alb_target_group.alb_target_group.arn}"
+  autoscaling_group_name = "${aws_autoscaling_group.autoscale.id}"
+}
+
+
+
+#----------------------------------------------------------------------
+#Route53
+
+data "aws_route53_zone" "h_zone" {
+  name = "${var.domain_name}"
+  private_zone = false
+}
+
+resource "aws_route53_record" "www" {
+  zone_id = "${data.aws_route53_zone.h_zone.zone_id}"
+  name    = "${var.domain_name}"
+  type    = "A"
+
+  alias {
+    name                   = "${aws_alb.alb.dns_name}"
+    zone_id                = "${aws_alb.alb.zone_id}"
+    evaluate_target_health = false
+  }
 }
 

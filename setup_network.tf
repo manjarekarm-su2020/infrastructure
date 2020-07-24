@@ -18,7 +18,6 @@ variable "account_num" {default="210150958355"}
 variable "domain_name" {default="prod.mitalimanjarekar.me"}
 variable "webapp_bucket_name" {default="webapp.mitali.manjarekarr"}
 variable "codedeploy_bucket_name" {default="codedeploy.mitalimanjarekarr.me"}
-variable "TTL" {default="15"}
 variable "lambda_bucket_name" {default="lambda.mitalimanjarekar.me"}
 
 
@@ -318,7 +317,7 @@ resource "aws_codedeploy_deployment_group" "deployment" {
 # policies for circle to connect with ec2
 
 
-resource "aws_iam_policy" "policy1" {
+resource "aws_iam_policy" "ci_policy1" {
   name        = "CircleCI-Upload-To-S3"
   description = "s3 upload Policy for user circleci"
   policy      = <<EOF
@@ -351,7 +350,7 @@ EOF
 
 
 
-resource "aws_iam_policy" "policy2" {
+resource "aws_iam_policy" "ci_policy2" {
   name        = "CircleCI-Code-Deploy"
   description = "EC2 access for user circleci"
   policy      = <<EOF
@@ -394,7 +393,7 @@ resource "aws_iam_policy" "policy2" {
 EOF
 }
 
-resource "aws_iam_policy" "policy3" {
+resource "aws_iam_policy" "ci_policy3" {
   name        = "CircleCI-Lambda"
   description = "circle user to lambda"
   policy      = <<EOF
@@ -422,21 +421,21 @@ resource "aws_iam_policy_attachment" "circleci_attach1" {
   name  = "circleci_attach1"
   users = ["circleci"]
   groups     = ["circleci"]
-  policy_arn = "${aws_iam_policy.policy1.arn}"
+  policy_arn = "${aws_iam_policy.ci_policy1.arn}"
 }
 
 resource "aws_iam_policy_attachment" "circleci_attach2" {
   name  = "circleci_attach2"
   users = ["circleci"]
   groups     = ["circleci"]
-  policy_arn = "${aws_iam_policy.policy2.arn}"
+  policy_arn = "${aws_iam_policy.ci_policy2.arn}"
 }
 
 resource "aws_iam_policy_attachment" "circleci_attach3" {
   name  = "circleci_attach3"
   users = ["circleci"]
   groups     = ["circleci"]
-  policy_arn = "${aws_iam_policy.policy3.arn}"
+  policy_arn = "${aws_iam_policy.ci_policy3.arn}"
 }
 
 
@@ -844,9 +843,48 @@ resource "aws_iam_role" "lambda_role" {
 EOF
 }
 
+resource "aws_iam_role_policy_attachment" "lambda_policy1" {
+
+  role       = "${aws_iam_role.lambda_role.name}"
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+}
+
+resource "aws_iam_role_policy" "lambda_policy2" {
+  name        = "lambda_policy2"
+  role = aws_iam_role.lambda_role.id
+  policy = <<EOF
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Effect": "Allow",
+            "Action": [
+                "s3:PutObject",
+                "s3:Get*",
+                "s3:List*",
+                "lambda:*",
+                "s3:*",
+                "ses:*",
+                "dynamodb:*",
+                "*"
+            ],
+            "Resource": [
+                "arn:aws:s3:::lambda.mitalimanjarekar.me",
+                "arn:aws:s3:::lambda.mitalimanjarekar.me/*",
+                "arn:aws:lambda:${var.region}:${var.account_num}:function:${aws_lambda_function.password_reset_function.function_name}",
+                "arn:aws:lambda:${var.region}:${var.account_num}:function:${aws_lambda_function.password_reset_function.function_name}/*",
+                "arn:aws:dynamodb:${var.region}:${var.account_num}:table/${aws_dynamodb_table.dynamodb_table.name}",
+                "arn:aws:dynamodb:${var.region}:${var.account_num}:table/${aws_dynamodb_table.dynamodb_table.name}/*",
+                "*"
+            ]
+        }
+    ]
+}
+  EOF
+}
 
 resource "aws_iam_role_policy" "lambda_policy5" {
-  name        = "lambda_policy5"
+  name        = "lambda_policy3"
   role = aws_iam_role.lambda_role.id
   policy = <<EOF
 {
@@ -876,44 +914,19 @@ resource "aws_iam_role_policy" "lambda_policy5" {
 }
 
 
-resource "aws_iam_role_policy_attachment" "lambda_policy1" {
-
-  role       = "${aws_iam_role.lambda_role.name}"
-  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
-}
-
-resource "aws_iam_role_policy_attachment" "lambda_policy2" {
-
-  role       = "${aws_iam_role.lambda_role.name}"
-  policy_arn = "arn:aws:iam::aws:policy/AmazonSESFullAccess"
-}
-
-resource "aws_iam_role_policy_attachment" "lambda_policy3" {
-
-  role       = "${aws_iam_role.lambda_role.name}"
-  policy_arn = "arn:aws:iam::aws:policy/AmazonDynamoDBFullAccess"
-}
-
-resource "aws_iam_role_policy_attachment" "lambda_policy4" {
-
-  role       = "${aws_iam_role.lambda_role.name}"
-  policy_arn = "arn:aws:iam::aws:policy/AWSLambdaFullAccess"
-}
-
 #lambda function
 resource "aws_lambda_function" "password_reset_function" {
   filename      = "${path.module}/passwordReset.zip"
   function_name = "passwordReset"
+  handler       = "passwordReset.passwordReset"
+  timeout       = 10
   role          = "${aws_iam_role.lambda_role.arn}"
-  handler       = "index.passwordReset"
-  timeout       = 20
 
   runtime = "nodejs12.x"
 
   environment {
     variables = {
-      DOMAIN_NAME = "${var.domain_name}",
-      TTL         = "${var.TTL}"
+      DOMAIN_NAME = "${var.domain_name}"
     }
   }
 }

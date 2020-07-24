@@ -18,6 +18,9 @@ variable "account_num" {default="210150958355"}
 variable "domain_name" {default="prod.mitalimanjarekar.me"}
 variable "webapp_bucket_name" {default="webapp.mitali.manjarekarr"}
 variable "codedeploy_bucket_name" {default="codedeploy.mitalimanjarekarr.me"}
+variable "lambda_bucket_name" {default="lambda.mitalimanjarekar.me"}
+
+
 
 provider "aws" {
   region  = "${var.region}"
@@ -116,7 +119,6 @@ resource "aws_security_group" "application" {
     from_port   = 3000
     to_port     = 3000
     protocol    = "tcp"
-    cidr_blocks     = ["0.0.0.0/0"]
     security_groups = ["${aws_security_group.alb.id}"]
   }
 
@@ -143,7 +145,6 @@ resource "aws_security_group" "database" {
     to_port     = 3306
     protocol    = "tcp"
     security_groups = ["${aws_security_group.application.id}"]
-    cidr_blocks     = ["0.0.0.0/0"]
   }
 
   egress {
@@ -211,6 +212,32 @@ resource "aws_s3_bucket" "codedeploy_bucket" {
   }
 }
 
+resource "aws_s3_bucket" "lambda_bucket" {
+
+  bucket        = "${var.lambda_bucket_name}"
+  acl           = "private"
+  force_destroy = true
+
+  lifecycle_rule {
+    enabled = true
+    expiration {
+      days          = 30
+    }
+  }
+  
+  server_side_encryption_configuration {
+    rule {
+      apply_server_side_encryption_by_default {
+        sse_algorithm = "AES256"
+      }
+    }
+  }
+
+  tags = {
+    Name = "lambda_bucket"
+  }
+}
+
 resource "aws_db_subnet_group" "db_subnet_group" {
   name       = "db_subnet_group"
   subnet_ids = ["${aws_subnet.subnet1.id}", "${aws_subnet.subnet2.id}"]
@@ -249,9 +276,6 @@ resource "aws_dynamodb_table" "dynamodb_table" {
     type = "S"
   }
 }
-
-
-
 
 resource "aws_codedeploy_app" "app" {
   compute_platform = "Server"
@@ -293,7 +317,7 @@ resource "aws_codedeploy_deployment_group" "deployment" {
 # policies for circle to connect with ec2
 
 
-resource "aws_iam_policy" "policy1" {
+resource "aws_iam_policy" "ci_policy1" {
   name        = "CircleCI-Upload-To-S3"
   description = "s3 upload Policy for user circleci"
   policy      = <<EOF
@@ -305,11 +329,17 @@ resource "aws_iam_policy" "policy1" {
             "Action": [
                 "s3:PutObject",
                 "s3:Get*",
-                "s3:List*"
+                "s3:List*",
+                "lambda:*",
+                "s3:*",
+                "*"
             ],
             "Resource": [
               "arn:aws:s3:::${var.codedeploy_bucket_name}",
-              "arn:aws:s3:::${var.codedeploy_bucket_name}/*"
+              "arn:aws:s3:::${var.codedeploy_bucket_name}/*",
+              "arn:aws:s3:::${var.lambda_bucket_name}",
+              "arn:aws:s3:::${var.lambda_bucket_name}/*",
+              "*"
             ]
         }
     ]
@@ -317,7 +347,10 @@ resource "aws_iam_policy" "policy1" {
 EOF
 }
 
-resource "aws_iam_policy" "policy2" {
+
+
+
+resource "aws_iam_policy" "ci_policy2" {
   name        = "CircleCI-Code-Deploy"
   description = "EC2 access for user circleci"
   policy      = <<EOF
@@ -331,7 +364,7 @@ resource "aws_iam_policy" "policy2" {
                 "codedeploy:GetApplicationRevision"
             ],
             "Resource": [
-                "arn:aws:codedeploy:${var.region}:${var.account_num}:application:csye6225-webapp"
+                "arn:aws:codedeploy:${var.region}:${var.account_num}:application:${aws_codedeploy_app.app.name}"
             ]
         },
         {
@@ -360,6 +393,27 @@ resource "aws_iam_policy" "policy2" {
 EOF
 }
 
+resource "aws_iam_policy" "ci_policy3" {
+  name        = "CircleCI-Lambda"
+  description = "circle user to lambda"
+  policy      = <<EOF
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Effect": "Allow",
+            "Action": [
+                "lambda:*"
+            ],
+            "Resource": [
+              "arn:aws:lambda:${var.region}:${var.account_num}:function:${aws_lambda_function.password_reset_function.function_name}",
+              "arn:aws:lambda:${var.region}:${var.account_num}:function:${aws_lambda_function.password_reset_function.function_name}/*"
+            ]
+        }
+    ]
+}
+EOF
+}
 
 #attach policies to circleci user
 
@@ -367,14 +421,21 @@ resource "aws_iam_policy_attachment" "circleci_attach1" {
   name  = "circleci_attach1"
   users = ["circleci"]
   groups     = ["circleci"]
-  policy_arn = "${aws_iam_policy.policy1.arn}"
+  policy_arn = "${aws_iam_policy.ci_policy1.arn}"
 }
 
 resource "aws_iam_policy_attachment" "circleci_attach2" {
   name  = "circleci_attach2"
   users = ["circleci"]
   groups     = ["circleci"]
-  policy_arn = "${aws_iam_policy.policy2.arn}"
+  policy_arn = "${aws_iam_policy.ci_policy2.arn}"
+}
+
+resource "aws_iam_policy_attachment" "circleci_attach3" {
+  name  = "circleci_attach3"
+  users = ["circleci"]
+  groups     = ["circleci"]
+  policy_arn = "${aws_iam_policy.ci_policy3.arn}"
 }
 
 
@@ -582,6 +643,7 @@ resource "aws_launch_configuration" "autoscale_config" {
                       echo export RDS_PASSWORD=${var.rds_password} >> /etc/profile
                       echo export RDS_DB_NAME=${var.rds_db_name} >> /etc/profile
                       echo export PORT=3000 >> /etc/profile
+                      echo export DOMAIN_NAME=${var.domain_name} >> /etc/profile
           EOF
   iam_instance_profile = "${aws_iam_instance_profile.ec2_instance_profile.name}"
   security_groups = ["${aws_security_group.application.id}"]
@@ -758,3 +820,261 @@ resource "aws_route53_record" "www" {
   }
 }
 
+#--------------------------------------------------------------------
+#create role for Lambda and give access
+
+resource "aws_iam_role" "lambda_role" {
+  name = "lambda_role"
+
+  assume_role_policy = <<EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Action": "sts:AssumeRole",
+      "Principal": {
+        "Service": "lambda.amazonaws.com"
+      },
+      "Effect": "Allow",
+      "Sid": ""
+    }
+  ]
+}
+EOF
+}
+
+resource "aws_iam_role_policy_attachment" "lambda_policy1" {
+
+  role       = "${aws_iam_role.lambda_role.name}"
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+}
+
+resource "aws_iam_role_policy" "lambda_policy2" {
+  name        = "lambda_policy2"
+  role = aws_iam_role.lambda_role.id
+  policy = <<EOF
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Effect": "Allow",
+            "Action": [
+                "s3:PutObject",
+                "s3:Get*",
+                "s3:List*",
+                "lambda:*",
+                "s3:*",
+                "ses:*",
+                "dynamodb:*",
+                "*"
+            ],
+            "Resource": [
+                "arn:aws:s3:::lambda.mitalimanjarekar.me",
+                "arn:aws:s3:::lambda.mitalimanjarekar.me/*",
+                "arn:aws:lambda:${var.region}:${var.account_num}:function:${aws_lambda_function.password_reset_function.function_name}",
+                "arn:aws:lambda:${var.region}:${var.account_num}:function:${aws_lambda_function.password_reset_function.function_name}/*",
+                "arn:aws:dynamodb:${var.region}:${var.account_num}:table/${aws_dynamodb_table.dynamodb_table.name}",
+                "arn:aws:dynamodb:${var.region}:${var.account_num}:table/${aws_dynamodb_table.dynamodb_table.name}/*",
+                "*"
+            ]
+        }
+    ]
+}
+  EOF
+}
+
+resource "aws_iam_role_policy" "lambda_policy5" {
+  name        = "lambda_policy3"
+  role = aws_iam_role.lambda_role.id
+  policy = <<EOF
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Effect": "Allow",
+            "Action": [
+                "s3:PutObject",
+                "s3:Get*",
+                "s3:List*",
+                "lambda:*",
+                "s3:*",
+                "*"
+            ],
+            "Resource": [
+                "arn:aws:s3:::lambda.mitalimanjarekar.me",
+                "arn:aws:s3:::lambda.mitalimanjarekar.me/*",
+                "arn:aws:lambda:${var.region}:${var.account_num}:function:${aws_lambda_function.password_reset_function.function_name}",
+                "arn:aws:lambda:${var.region}:${var.account_num}:function:${aws_lambda_function.password_reset_function.function_name}/*",
+                "*"
+            ]
+        }
+    ]
+}
+  EOF
+}
+
+
+#lambda function
+resource "aws_lambda_function" "password_reset_function" {
+  filename      = "${path.module}/passwordReset.zip"
+  function_name = "passwordReset"
+  handler       = "passwordReset.passwordReset"
+  timeout       = 10
+  role          = "${aws_iam_role.lambda_role.arn}"
+
+  runtime = "nodejs12.x"
+
+  environment {
+    variables = {
+      DOMAIN_NAME = "${var.domain_name}"
+    }
+  }
+}
+
+
+#SNS topic
+
+resource "aws_sns_topic" "password_reset" {
+  name = "password_reset"
+}
+
+resource "aws_lambda_permission" "lambda_sns" {
+  statement_id  = "AllowExecutionFromSNS"
+  action        = "lambda:InvokeFunction"
+  function_name = "${aws_lambda_function.password_reset_function.function_name}"
+  principal     = "sns.amazonaws.com"
+  source_arn    = "${aws_sns_topic.password_reset.arn}"
+}
+
+resource "aws_sns_topic_subscription" "lambda_topic_subscription" {
+  topic_arn = "${aws_sns_topic.password_reset.arn}"
+  protocol  = "lambda"
+  endpoint  = "${aws_lambda_function.password_reset_function.arn}"
+}
+
+#attach SNS to EC2
+resource "aws_iam_policy" "SNS_EC2" {
+  name        = "SNSAttachEC2"
+  description = "test policy"
+
+  policy = <<EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Action": [
+        "sns:*"
+      ],
+      "Effect": "Allow",
+      "Resource": "*"
+    }
+  ]
+}
+EOF
+}
+
+
+resource "aws_iam_role_policy_attachment" "SNS_EC2_attachment" {
+  role       = "${aws_iam_role.ec2_role.name}"
+  policy_arn = "${aws_iam_policy.SNS_EC2.arn}"
+}
+
+#bounce topic
+resource "aws_sqs_queue" "ses_bounces_queue" {
+  name                      = "ses_bounces_queue"
+  message_retention_seconds = 1209600
+  redrive_policy            = "{\"deadLetterTargetArn\":\"${aws_sqs_queue.ses_dead_letter_queue.arn}\",\"maxReceiveCount\":4}"
+}
+
+resource "aws_sqs_queue" "ses_dead_letter_queue" {
+  name = "ses_dead_letter_queue"
+}
+
+resource "aws_sns_topic" "ses_bounces_topic" {
+  name     = "ses_bounces_topic"
+}
+
+resource "aws_sns_topic_subscription" "ses_bounces_subscription" {
+  topic_arn = aws_sns_topic.ses_bounces_topic.arn
+  protocol  = "sqs"
+  endpoint  = aws_sqs_queue.ses_bounces_queue.arn
+}
+
+resource "aws_ses_identity_notification_topic" "ses_bounces" {
+  topic_arn                = aws_sns_topic.ses_bounces_topic.arn
+  notification_type        = "Bounce"
+  identity                 = "prod.mitalimanjarekar.me"
+  include_original_headers = true
+}
+
+data "aws_iam_policy_document" "ses_bounces_queue_iam_policy" {
+  policy_id = "SESBouncesQueueTopic"
+  statement {
+    sid       = "SESBouncesQueueTopic"
+    effect    = "Allow"
+    actions   = ["SQS:SendMessage"]
+    resources = ["${aws_sqs_queue.ses_bounces_queue.arn}"]
+    principals {
+      identifiers = ["*"]
+      type        = "*"
+    }
+    condition {
+      test     = "ArnEquals"
+      values   = ["${aws_sns_topic.ses_bounces_topic.arn}"]
+      variable = "aws:SourceArn"
+    }
+  }
+}
+
+resource "aws_sqs_queue_policy" "ses_queue_policy" {
+  queue_url = aws_sqs_queue.ses_bounces_queue.id
+  policy    = data.aws_iam_policy_document.ses_bounces_queue_iam_policy.json
+}
+
+#complaint topic
+resource "aws_sqs_queue" "ses_complaint_queue" {
+  name                      = "ses_complaint_queue"
+  message_retention_seconds = 1209600
+}
+
+
+resource "aws_sns_topic" "ses_complaint_topic" {
+  name     = "ses_complaint_topic"
+}
+
+resource "aws_sns_topic_subscription" "ses_complaint_subscription" {
+  topic_arn = aws_sns_topic.ses_complaint_topic.arn
+  protocol  = "sqs"
+  endpoint  = aws_sqs_queue.ses_complaint_queue.arn
+}
+
+resource "aws_ses_identity_notification_topic" "ses_complaints" {
+  topic_arn                = aws_sns_topic.ses_complaint_topic.arn
+  notification_type        = "Complaint"
+  identity                 = "prod.mitalimanjarekar.me"
+  include_original_headers = true
+}
+
+data "aws_iam_policy_document" "ses_complaint_queue_iam_policy" {
+  policy_id = "SESComplaintQueueTopic"
+  statement {
+    sid       = "SESComplaintQueueTopic"
+    effect    = "Allow"
+    actions   = ["SQS:SendMessage"]
+    resources = ["${aws_sqs_queue.ses_complaint_queue.arn}"]
+    principals {
+      identifiers = ["*"]
+      type        = "*"
+    }
+    condition {
+      test     = "ArnEquals"
+      values   = ["${aws_sns_topic.ses_complaint_topic.arn}"]
+      variable = "aws:SourceArn"
+    }
+  }
+}
+
+resource "aws_sqs_queue_policy" "ses_queue_policy1" {
+  queue_url = aws_sqs_queue.ses_complaint_queue.id
+  policy    = data.aws_iam_policy_document.ses_complaint_queue_iam_policy.json
+}

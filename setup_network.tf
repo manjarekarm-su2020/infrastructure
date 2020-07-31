@@ -19,6 +19,7 @@ variable "domain_name" {default="prod.mitalimanjarekar.me"}
 variable "webapp_bucket_name" {default="webapp.mitali.manjarekarr"}
 variable "codedeploy_bucket_name" {default="codedeploy.mitalimanjarekarr.me"}
 variable "lambda_bucket_name" {default="lambda.mitalimanjarekar.me"}
+variable "cert_arn" {default="arn:aws:acm:us-east-1:210150958355:certificate/da6b93e0-9866-4dd5-b90b-5820460d727f"}
 
 
 
@@ -115,12 +116,13 @@ resource "aws_security_group" "application" {
 
 
   ingress {
-    description = "allow tcp traffic from load balancer on port 3000"
-    from_port   = 3000
-    to_port     = 3000
+    description = "allow tcp traffic from load balancer on port 3002"
+    from_port   = 3002
+    to_port     = 3002
     protocol    = "tcp"
     security_groups = ["${aws_security_group.alb.id}"]
   }
+
 
   egress {
     from_port   = 0
@@ -250,7 +252,7 @@ resource "aws_db_instance" "rds_instance" {
   multi_az               = false
   db_subnet_group_name   = "${aws_db_subnet_group.db_subnet_group.name}"
   engine                 = "mysql"
-  engine_version         = "5.7"
+  engine_version         = "8.0"
   instance_class         = "db.t3.micro"
   vpc_security_group_ids = ["${aws_security_group.database.id}"]
   skip_final_snapshot    = true
@@ -258,6 +260,8 @@ resource "aws_db_instance" "rds_instance" {
   name                   = "${var.rds_db_name}"
   username               = "${var.rds_username}"
   password               = "${var.rds_password}"
+  parameter_group_name   = "${aws_db_parameter_group.performance_schema.name}"
+  storage_encrypted      = true
 
   tags = {
     Name = "rds_instance"
@@ -298,6 +302,18 @@ resource "aws_codedeploy_deployment_group" "deployment" {
       key   = "Name"
       type  = "KEY_AND_VALUE"
       value = "target_ec2_instance"
+    }
+  }
+
+  load_balancer_info {
+    target_group_pair_info {
+      prod_traffic_route {
+        listener_arns = ["${aws_alb_listener.ssl_listener.arn}"]
+      }
+
+      target_group {
+        name = "${aws_alb_target_group.alb_target_group.name}"
+      }
     }
   }
 
@@ -642,7 +658,7 @@ resource "aws_launch_configuration" "autoscale_config" {
                       echo export RDS_USER_NAME=${var.rds_username} >> /etc/profile
                       echo export RDS_PASSWORD=${var.rds_password} >> /etc/profile
                       echo export RDS_DB_NAME=${var.rds_db_name} >> /etc/profile
-                      echo export PORT=3000 >> /etc/profile
+                      echo export PORT=3002 >> /etc/profile
                       echo export DOMAIN_NAME=${var.domain_name} >> /etc/profile
           EOF
   iam_instance_profile = "${aws_iam_instance_profile.ec2_instance_profile.name}"
@@ -730,9 +746,9 @@ resource "aws_security_group" "alb" {
   vpc_id      = "${aws_vpc.vpc.id}"
 
   ingress {
-    description = "allow http traffic on port 80"
-    from_port   = 80
-    to_port     = 80
+    description = "allow https traffic on port 443"
+    from_port   = 443
+    to_port     = 443
     protocol    = "tcp"
     cidr_blocks     = ["0.0.0.0/0"]
   }
@@ -758,21 +774,9 @@ resource "aws_alb" "alb" {
 }
 
 
-resource "aws_alb_listener" "alb_listener" {  
-  load_balancer_arn = "${aws_alb.alb.arn}"  
-  port              = "80"  
-  protocol          = "HTTP"
-  
-  default_action {    
-    target_group_arn = "${aws_alb_target_group.alb_target_group.arn}"
-    type             = "forward"  
-  }
-}
-
-
 resource "aws_alb_target_group" "alb_target_group" {  
   name     = "albTargetGroup"  
-  port     = "3000"  
+  port     = "3002"  
   protocol = "HTTP"  
   vpc_id   = "${aws_vpc.vpc.id}"   
   tags = {    
@@ -1077,4 +1081,32 @@ data "aws_iam_policy_document" "ses_complaint_queue_iam_policy" {
 resource "aws_sqs_queue_policy" "ses_queue_policy1" {
   queue_url = aws_sqs_queue.ses_complaint_queue.id
   policy    = data.aws_iam_policy_document.ses_complaint_queue_iam_policy.json
+}
+
+#-------------------------------------------
+#listener for https
+
+resource "aws_alb_listener" "ssl_listener" {
+  load_balancer_arn = "${aws_alb.alb.arn}"
+  port              = "443"
+  protocol          = "HTTPS"
+  ssl_policy        = "ELBSecurityPolicy-2016-08"
+  depends_on        = [aws_alb_target_group.alb_target_group]
+  certificate_arn = "${var.cert_arn}"
+   
+  default_action {
+    target_group_arn = "${aws_alb_target_group.alb_target_group.arn}"
+    type             = "forward"
+  }
+}
+
+resource "aws_db_parameter_group" "performance_schema" {
+  name   = "performance-schema"
+  family = "mysql8.0"
+
+  parameter {
+    name         = "performance_schema"
+    value        = "1"
+    apply_method = "pending-reboot"
+  }
 }
